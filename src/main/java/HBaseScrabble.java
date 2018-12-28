@@ -39,19 +39,31 @@ public class HBaseScrabble {
     }
 
     public void loadTable(String folder)throws IOException{
+
+        HTable hTable = new HTable(config,table);
+
         // TODO: input as a file or a folder? ATM is a file.
-        CSVReader csvReader = new CSVReader(new BufferedReader(new FileReader(new File(folder))));
+
+        // Alternative (folder case):
+
+        File folder_file = new File(folder);
+        File[] listOfFiles = folder_file.listFiles();
+
+
+        CSVReader csvReader = new CSVReader(new BufferedReader(new FileReader(listOfFiles[0])));
         String[] nextRecord;
-        int count = 0;
-        while ((nextRecord = csvReader.readNext()) != null && count < 10) {
-            count++;
-            System.out.println(nextRecord);
+        while ((nextRecord = csvReader.readNext()) != null) {
+            putAll(hTable, nextRecord[1], nextRecord[4], nextRecord[9], nextRecord[3], nextRecord[0], nextRecord[2],
+                    nextRecord[5],nextRecord[6],nextRecord[7],nextRecord[8],
+                    nextRecord[10],nextRecord[11],nextRecord[12],nextRecord[13],
+                    nextRecord[14],nextRecord[15],nextRecord[16],nextRecord[17]);
         }
     }
 
-    private void putAll(HTable hTable, int tourneyid, String winnername, int loserid, int winnerid, int gameid, String tie,
-                        int winnerscore, int winneroldrating, int winnernewrating, int winnerpos, int loseroldrating,
-                        int losernewrating, int loserpos, int round, int division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
+    private void putAll(HTable hTable, String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
+                        String winnerscore, String winneroldrating, String winnernewrating, String winnerpos,
+                        String loserscore, String loseroldrating, String losernewrating, String loserpos,
+                        String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
 
         // primary column family
         boolean bool_tie = tie.equals("True");
@@ -69,6 +81,7 @@ public class HBaseScrabble {
         byte[] byte_winneroldrating = Bytes.toBytes(winneroldrating);
         byte[] byte_winnernewrating = Bytes.toBytes(winnernewrating);
         byte[] byte_winnerpos = Bytes.toBytes(winnerpos);
+        byte[] byte_loserscore = Bytes.toBytes(loserscore);
         byte[] byte_loseroldrating = Bytes.toBytes(loseroldrating);
         byte[] byte_losernewrating = Bytes.toBytes(losernewrating);
         byte[] byte_loserpos = Bytes.toBytes(loserpos);
@@ -92,6 +105,7 @@ public class HBaseScrabble {
         put.add(sideCf.getBytes(), "winneroldrating".getBytes(), ts, byte_winneroldrating);
         put.add(sideCf.getBytes(), "winnernewrating".getBytes(), ts, byte_winnernewrating);
         put.add(sideCf.getBytes(), "winnerpos".getBytes(), ts, byte_winnerpos);
+        put.add(sideCf.getBytes(), "loserscore".getBytes(), ts, byte_loserscore);
         put.add(sideCf.getBytes(), "loseroldrating".getBytes(), ts, byte_loseroldrating);
         put.add(sideCf.getBytes(), "losernewrating".getBytes(), ts, byte_losernewrating);
         put.add(sideCf.getBytes(), "loserpos".getBytes(), ts, byte_loserpos);

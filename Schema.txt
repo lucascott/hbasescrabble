@@ -1,22 +1,22 @@
 Q1	Q2	Q3	VARIABLE 			DESCRIPTION
-		o	gameid 				A numerical game ID
-i	i	i	tourneyid 			A numerical tournament ID
-		'o	tie 				A binary variable indicating if the game ended in a tie
-	o	o	winnerid 			A numerical ID for the winning player
-i			winnername 			The name of the winning player
-			winnerscore 		The score of the winning player
-			winneroldrating 	The winner’s rating before the game
-			winnernewrating 	The winner’s rating after the game
-			winnerpos 			The winner’s position in the tournament
-o	o	o	loserid 			A numerical ID for the losing player
-			loserscore 			The score of the losing player
-			loseroldrating 		The loser’s rating before the game
-			losernewrating 		The loser’s rating after the game
-			loserpos 			The loser’s position in the tournament
-			round 				The round of the tournament in which the game took place
-			division 			The division of the tournament in which the game took place
-			date 				The date of the game
-			lexicon			 	Binary variable: either game’s lexicon is the main North American lexicon (F) or the international lexicon (T)
+		o	gameid 				0 A numerical game ID
+i	i	i	tourneyid 			1 A numerical tournament ID
+		'o	tie 				2 A binary variable indicating if the game ended in a tie
+	o	o	winnerid 			3 A numerical ID for the winning player
+i			winnername 			4 The name of the winning player
+			winnerscore 		5 The score of the winning player
+			winneroldrating 	6 The winner’s rating before the game
+			winnernewrating 	7 The winner’s rating after the game
+			winnerpos 			8 The winner’s position in the tournament
+o	o	o	loserid 			9 A numerical ID for the losing player
+			loserscore 			10 The score of the losing player
+			loseroldrating 		11 The loser’s rating before the game
+			losernewrating 		12 The loser’s rating after the game
+			loserpos 			13 The loser’s position in the tournament
+			round 				14 The round of the tournament in which the game took place
+			division 			15 The division of the tournament in which the game took place
+			date 				16 The date of the game
+			lexicon			 	17 Binary variable: either game’s lexicon is the main North American lexicon (F) or the international lexicon (T)
 
 
 
