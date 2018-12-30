@@ -3,16 +3,11 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.client.RetriesExhaustedWithDetailsException;
+import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.*;
-import java.util.Arrays;
-import java.util.List;
-
+import java.util.*;
 
 
 public class HBaseScrabble {
@@ -89,7 +84,7 @@ public class HBaseScrabble {
                         String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
 
         // primary column family
-        byte[] key = Bytes.toBytes(tourneyid + winnername);
+        byte[] key = Bytes.toBytes(tourneyid + winnername + gameid);
         byte[] byte_tourneyid = tourneyid.getBytes();
         byte[] byte_winnername = winnername.getBytes();
         byte[] byte_loserid = loserid.getBytes();
@@ -159,22 +154,95 @@ public class HBaseScrabble {
 
 
     public List<String> query1(String tourneyid, String winnername) throws IOException {
-        //TO IMPLEMENT
-        System.exit(-1);
-        return null;
+        HTable hTable = new HTable(config,table);
 
+        byte[] startKey = (tourneyid + winnername).getBytes();
+        byte[] endKey = (tourneyid + winnername + "z").getBytes();
+        List<String> res = new ArrayList<>();
+
+        Scan scan = new Scan(startKey,endKey);
+        ResultScanner rs = hTable.getScanner(scan);
+
+        Result result = rs.next();
+        while (result!=null && !result.isEmpty()){
+            //String key = Bytes.toString(result.getRow());
+            res.add(Bytes.toString(result.getValue(primaryCf.getBytes(),"loserid".getBytes())));
+            //System.out.println("Key : "+ key + " Loserid : " + loserid);
+
+            result = rs.next();
+        }
+
+        return res;
     }
 
+    // Returns the ids of the players (winner and loser) that have participated more than once
+    // in all tournaments between two given Tourneyids.
     public List<String> query2(String firsttourneyid, String lasttourneyid) throws IOException {
-        //TO IMPLEMENT
-        System.exit(-1);
-        return null;
-    }
+        HTable hTable = new HTable(config,table);
 
+        byte[] startKey = (firsttourneyid).getBytes();
+        byte[] endKey = (lasttourneyid + "z").getBytes();
+        List<String> res = new ArrayList<>();
+
+        Scan scan = new Scan(startKey,endKey);
+        ResultScanner rs = hTable.getScanner(scan);
+        Map<String, MutableInt> freq = new HashMap<>();
+        MutableInt count;
+
+        Result result = rs.next();
+        while (result!=null && !result.isEmpty()){
+            //String key = Bytes.toString(result.getRow());
+            String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(),"loserid".getBytes()));
+            String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(),"winnerid".getBytes()));
+            count = freq.get(winnerid);
+            if (count == null) {
+                freq.put(winnerid, new MutableInt());
+            }
+            else {
+                count.increment();
+            }
+            count = freq.get(loserid);
+            if (count == null) {
+                freq.put(loserid, new MutableInt());
+            }
+            else {
+                count.increment();
+            }
+            //System.out.println("Key : "+ key + " Win : " + winnerid + " Lose : " + loserid);
+
+            result = rs.next();
+        }
+        for (Map.Entry<String, MutableInt> entry : freq.entrySet())
+        {
+            if (entry.getValue().get() > 1){
+                res.add(entry.getKey());
+            }
+        }
+        return res;
+    }
+    // Given a Tourneyid, the query returns the Gameid, the ids of the two participants that
+    // have finished in tie.
     public List<String> query3(String tourneyid) throws IOException {
-        //TO IMPLEMENT
-        System.exit(-1);
-        return null;
+        HTable hTable = new HTable(config,table);
+
+        byte[] startKey = (tourneyid).getBytes();
+        byte[] endKey = (tourneyid + "z").getBytes();
+        List<String> res = new ArrayList<>();
+
+        Scan scan = new Scan(startKey,endKey);
+        ResultScanner rs = hTable.getScanner(scan);
+
+        Result result = rs.next();
+        while (result!=null && !result.isEmpty()){
+            //String key = Bytes.toString(result.getRow());
+            String tie = Bytes.toString(result.getValue(primaryCf.getBytes(),"tie".getBytes()));
+            if (tie.equals("True")) {
+                res.add(Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes())));
+            }
+            result = rs.next();
+        }
+
+        return res;
     }
 
 
@@ -243,7 +311,10 @@ public class HBaseScrabble {
         }
 
     }
+}
 
-
-
+class MutableInt {
+    private int value = 1; // note that we start at 1 since we're counting
+    public void increment() { ++value;      }
+    public int get()       { return value; }
 }
