@@ -27,7 +27,7 @@ i	i	i	* tourneyid 		A numerical tournament ID
 i			* winnername 		The name of the winning player
 o	o	o	loserid 			A numerical ID for the losing player
 	o	o	winnerid 			A numerical ID for the winning player
-		o	gameid 				A numerical game ID
+		o	* gameid 				A numerical game ID
 		'o	tie 				A binary variable indicating if the game ended in a tie
 
 sideCf:
