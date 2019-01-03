@@ -7,15 +7,22 @@ import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.util.*;
 
 
 public class HBaseScrabble {
     private Configuration config;
     private HBaseAdmin hBaseAdmin;
-    TableName table = TableName.valueOf("ScrabbleGames");
-    String primaryCf = "primaryCf";
-    String sideCf = "sideCf";
+    private TableName table = TableName.valueOf("ScrabbleGames");
+    private String primaryCf = "primaryCf";
+    private String sideCf = "sideCf";
+
+    // key sizing
+    private final short key1Size = 4;
+    private final short key2Size = 50;
+    private final short key3Size = 4;
+    private final short keyTotalSize = key1Size + key2Size + key3Size;
 
     /**
      * The Constructor. Establishes the connection with HBase.
@@ -84,7 +91,7 @@ public class HBaseScrabble {
                         String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
 
         // primary column family
-        byte[] key = Bytes.toBytes(tourneyid + winnername + gameid);
+        byte[] key = createKey(tourneyid, winnername, gameid);
         byte[] byte_tourneyid = tourneyid.getBytes();
         byte[] byte_winnername = winnername.getBytes();
         byte[] byte_loserid = loserid.getBytes();
@@ -108,7 +115,7 @@ public class HBaseScrabble {
         byte[] byte_lexicon = lexicon.getBytes(); //Bytes.toBytes(lexicon.equals("True")? 1:0);
 
         // Put command
-        Put put = new Put(key);
+        Put put = new Put(createKey(tourneyid, winnername, gameid));
         long ts = System.currentTimeMillis();
 
         put.add(primaryCf.getBytes(), "tourneyid".getBytes(), ts, byte_tourneyid);
@@ -136,6 +143,68 @@ public class HBaseScrabble {
     }
 
     /**
+     * 4 byte for the tourneyid (max in the dataset: 3021) = 32 bit (in Two's Complement)
+     * 50 byte for the
+     * 4 byte per il gameid (max in the dataset: 1823783) = 32 bit (in Two's Complement)
+     * @param tourneyid
+     * @param winnername
+     * @param gameid
+     * @return
+     */
+    private byte[] createKey(String tourneyid, String winnername, String gameid) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        byte[] gameid_bin = ByteBuffer.allocate(key3Size).putInt(Integer.valueOf(gameid)).array();
+        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
+        System.arraycopy(winnername.getBytes(), 0, key, key1Size, winnername.length());
+        System.arraycopy(gameid_bin, 0, key, key1Size + key2Size, gameid_bin.length);
+        return key;
+    }
+
+    private byte[] generateStartKey(String tourneyid) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin,0,key,0,tourneyid_bin.length);
+        for (int i = key1Size; i < keyTotalSize; i++){
+            key[i] = (byte)0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
+        }
+        return key;
+    }
+
+    private byte[] generateEndKey(String tourneyid) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin,0,key,0,tourneyid_bin.length);
+        for (int i = key1Size; i < keyTotalSize; i++){
+            key[i] = (byte)127;
+        }
+        return key;
+    }
+
+    private byte[] generateStartKey(String tourneyid, String winnername) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin,0,key,0,tourneyid_bin.length);
+        System.arraycopy(winnername.getBytes(),0,key,key1Size,winnername.length());
+        for (int i = key2Size; i < keyTotalSize; i++){
+            key[i] = (byte)0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
+        }
+        System.out.println();
+        return key;
+    }
+
+    private byte[] generateEndKey(String tourneyid, String winnername) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin,0,key,0,tourneyid_bin.length);
+        System.arraycopy(winnername.getBytes(),0,key,key1Size,winnername.length());
+        for (int i = key2Size; i < keyTotalSize; i++){
+            key[i] = (byte)127;
+        }
+        return key;
+    }
+
+    /**
      * This method generates the key
      * @param values The value of each column
      * @param keyTable The position of each value that is required to create the key in the array of values.
@@ -156,8 +225,8 @@ public class HBaseScrabble {
     public List<String> query1(String tourneyid, String winnername) throws IOException {
         HTable hTable = new HTable(config,table);
 
-        byte[] startKey = (tourneyid + winnername).getBytes();
-        byte[] endKey = (tourneyid + winnername + "z").getBytes();
+        byte[] startKey = generateStartKey(tourneyid, winnername);
+        byte[] endKey = generateEndKey(tourneyid, winnername);
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey,endKey);
@@ -180,8 +249,8 @@ public class HBaseScrabble {
     public List<String> query2(String firsttourneyid, String lasttourneyid) throws IOException {
         HTable hTable = new HTable(config,table);
 
-        byte[] startKey = (firsttourneyid).getBytes();
-        byte[] endKey = (lasttourneyid + "z").getBytes();
+        byte[] startKey = generateStartKey(firsttourneyid);
+        byte[] endKey = generateEndKey(lasttourneyid);
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey,endKey);
@@ -225,8 +294,8 @@ public class HBaseScrabble {
     public List<String> query3(String tourneyid) throws IOException {
         HTable hTable = new HTable(config,table);
 
-        byte[] startKey = (tourneyid).getBytes();
-        byte[] endKey = (tourneyid + "z").getBytes();
+        byte[] startKey = generateStartKey(tourneyid);
+        byte[] endKey = generateEndKey(tourneyid);
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey,endKey);
