@@ -62,7 +62,8 @@ public class HBaseScrabble {
     }
 
     private void waitOnlineNewRegionsAfterSplit(byte[] startKey) throws IOException, InterruptedException {
-        short sleepTime = 1000;
+        short sleepTime = 500;
+        short maxRetries = 5;
         HRegionInfo newLeftSideRegion = null;
         HRegionInfo newRightSideRegion = null;
 
@@ -73,12 +74,12 @@ public class HBaseScrabble {
             Iterator<HRegionInfo> iter = regions.iterator();
 
             while (iter.hasNext() && (newLeftSideRegion == null || newRightSideRegion == null)) {
-                HRegionInfo rinfo = iter.next();
-                if (Arrays.equals(rinfo.getEndKey(), startKey)) {
-                    newLeftSideRegion = rinfo;
+                HRegionInfo regInfo = iter.next();
+                if (Arrays.equals(regInfo.getEndKey(), startKey)) {
+                    newLeftSideRegion = regInfo;
                 }
-                if (Arrays.equals(rinfo.getStartKey(), startKey)) {
-                    newRightSideRegion = rinfo;
+                if (Arrays.equals(regInfo.getStartKey(), startKey)) {
+                    newRightSideRegion = regInfo;
                 }
             }
             if (newLeftSideRegion == null || newRightSideRegion == null) {
@@ -86,9 +87,9 @@ public class HBaseScrabble {
                 Thread.sleep(sleepTime);
                 retry++;
             }
-        } while ((newLeftSideRegion == null || newRightSideRegion == null) && retry <= 50);
+        } while ((newLeftSideRegion == null || newRightSideRegion == null) && retry <= maxRetries);
 
-        if (retry > 3) {
+        if (retry > maxRetries) {
             throw new IOException("Split failed, can't find regions with startKey and endKey = " + Bytes.toStringBinary(startKey));
         }
     }
