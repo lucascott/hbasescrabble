@@ -1,6 +1,8 @@
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.filter.CompareFilter;
+import org.apache.hadoop.hbase.filter.SingleColumnValueFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.*;
@@ -145,7 +147,7 @@ public class HBaseScrabble {
                         nextRecord[10], nextRecord[11], nextRecord[12], nextRecord[13], nextRecord[14],
                         nextRecord[15], nextRecord[16], nextRecord[17], nextRecord[18]));
 
-                if (DEBUG && c % 1000 == 0) {
+                if (DEBUG && c % 10000 == 0) {
                     System.out.println("##### Inserted line " + c + ", " + (c / 1542642 * 100) + "% done.");
                     /*
                     for (int i = 0; i < nextRecord.length; i++) {
@@ -154,7 +156,7 @@ public class HBaseScrabble {
                     */
                 }
                 c++;
-                if (putList.size() == 1000) {
+                if (putList.size() == 10000) {
                     hTable.put(putList);
                     putList = new ArrayList<>();
                 }
@@ -419,17 +421,20 @@ public class HBaseScrabble {
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
+        SingleColumnValueFilter tieFilter = new SingleColumnValueFilter(
+                primaryCf.getBytes(),
+                "tie".getBytes(),
+                CompareFilter.CompareOp.EQUAL,
+                Bytes.toBytes("True")
+        );
+        scan.setFilter(tieFilter);
         ResultScanner rs = hTable.getScanner(scan);
-
         Result result = rs.next();
         while (result != null && !result.isEmpty()) {
-            String tie = Bytes.toString(result.getValue(primaryCf.getBytes(), "tie".getBytes()));
-            if (tie.equals("True")) {
-                String gId = Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes()));
-                String wId = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
-                String lId = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
-                res.add(gId + "-" + wId + "-" + lId);
-            }
+            String gId = Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes()));
+            String wId = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
+            String lId = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
+            res.add(gId + "-" + wId + "-" + lId);
             result = rs.next();
         }
 
