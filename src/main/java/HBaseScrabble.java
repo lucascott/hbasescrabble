@@ -297,13 +297,7 @@ public class HBaseScrabble {
      * @return An array of bytes containing the last key for the tourney ID
      */
     private byte[] generateEndKey(String tourneyid) {
-        byte[] key = new byte[keyTotalSize];
-        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
-        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
-        for (int i = key1Size; i < keyTotalSize; i++) {
-            key[i] = (byte) 127;
-        }
-        return key;
+        return generateStartKey(tourneyid);
     }
 
     /**
@@ -384,24 +378,40 @@ public class HBaseScrabble {
     public List<String> query2(String firsttourneyid, String lasttourneyid) throws IOException {
         HTable hTable = new HTable(config, table);
 
-        byte[] startKey = generateStartKey(firsttourneyid);
-        byte[] endKey = generateEndKey(lasttourneyid);
-
-        Scan scan = new Scan(startKey, endKey);
-        ResultScanner rs = hTable.getScanner(scan);
         HashSet<String> freq = new HashSet<>();
         HashSet<String> res = new HashSet<>();
+        HashSet<String> prevRes = new HashSet<>();
+        for (int i = Integer.getInteger(firsttourneyid); i < Integer.getInteger(lasttourneyid); i++) {
+            freq = new HashSet<>();
+            prevRes = res;
+            res = new HashSet<>();
+            byte[] startKey = generateStartKey(Integer.toString(i));
+            byte[] endKey = generateEndKey(Integer.toString(i + 1));
 
-        Result result = rs.next();
-        while (result != null && !result.isEmpty()) {
-            String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
-            String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
-            if (!freq.add(winnerid))
-                res.add(winnerid);
-            if (!freq.add(loserid))
-                res.add(loserid);
-            result = rs.next();
+            Scan scan = new Scan(startKey, endKey);
+            ResultScanner rs = hTable.getScanner(scan);
+
+            Result result = rs.next();
+            while (result != null && !result.isEmpty()) {
+                String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
+                String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
+
+                if (i == Integer.getInteger(firsttourneyid)) { // first tourney
+                    if (!freq.add(winnerid))
+                        res.add(winnerid);
+                    if (!freq.add(loserid))
+                        res.add(loserid);
+                } else {
+                    if (!freq.add(winnerid) && prevRes.contains(winnerid))
+                        res.add(winnerid);
+                    if (!freq.add(loserid) && prevRes.contains(loserid))
+                        res.add(loserid);
+                }
+
+                result = rs.next();
+            }
         }
+
         return new ArrayList<>(res);
     }
 
@@ -417,7 +427,7 @@ public class HBaseScrabble {
         HTable hTable = new HTable(config, table);
 
         byte[] startKey = generateStartKey(tourneyid);
-        byte[] endKey = generateEndKey(tourneyid);
+        byte[] endKey = generateEndKey(Integer.toString(Integer.getInteger(tourneyid) + 1));
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
