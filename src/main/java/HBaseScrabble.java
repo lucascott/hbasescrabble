@@ -148,7 +148,7 @@ public class HBaseScrabble {
                         nextRecord[15], nextRecord[16], nextRecord[17], nextRecord[18]));
 
                 if (DEBUG && c % 10000 == 0) {
-                    System.out.println("##### Inserted line " + c + ", " + (c / 1542642 * 100) + "% done.");
+                    System.out.println("##### Inserted line " + c + ", " + (c * 100 / 1542642) + "% done.");
                     /*
                     for (int i = 0; i < nextRecord.length; i++) {
                         System.out.println(header[i] + " : " + nextRecord[i]);
@@ -381,7 +381,7 @@ public class HBaseScrabble {
         HashSet<String> freq = new HashSet<>();
         HashSet<String> res = new HashSet<>();
         HashSet<String> prevRes = new HashSet<>();
-        for (int i = Integer.getInteger(firsttourneyid); i < Integer.getInteger(lasttourneyid); i++) {
+        for (int i = Integer.parseInt(firsttourneyid); i < Integer.parseInt(lasttourneyid); i++) {
             freq = new HashSet<>();
             prevRes = res;
             res = new HashSet<>();
@@ -396,12 +396,12 @@ public class HBaseScrabble {
                 String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
                 String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
 
-                if (i == Integer.getInteger(firsttourneyid)) { // first tourney
+                if (i == Integer.parseInt(firsttourneyid)) { // first tourney
                     if (!freq.add(winnerid))
                         res.add(winnerid);
                     if (!freq.add(loserid))
                         res.add(loserid);
-                } else {
+                } else { // the others
                     if (!freq.add(winnerid) && prevRes.contains(winnerid))
                         res.add(winnerid);
                     if (!freq.add(loserid) && prevRes.contains(loserid))
@@ -409,6 +409,9 @@ public class HBaseScrabble {
                 }
 
                 result = rs.next();
+            }
+            if (res.size() == 0) { // if there are no element makes no sense to check further
+                break;
             }
         }
 
@@ -427,7 +430,7 @@ public class HBaseScrabble {
         HTable hTable = new HTable(config, table);
 
         byte[] startKey = generateStartKey(tourneyid);
-        byte[] endKey = generateEndKey(Integer.toString(Integer.getInteger(tourneyid) + 1));
+        byte[] endKey = generateEndKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
