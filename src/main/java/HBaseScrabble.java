@@ -19,9 +19,8 @@ public class HBaseScrabble {
 
     // key sizing
     private final short key1Size = 4;
-    private final short key2Size = 50;
     private final short key3Size = 4;
-    private final short keyTotalSize = key1Size + key2Size + key3Size;
+    private final short keyTotalSize = key1Size + key3Size;
 
     //DEBUG
     private final boolean DEBUG = true;
@@ -127,14 +126,11 @@ public class HBaseScrabble {
 
         HTable hTable = new HTable(config, table);
 
-        // TODO: How to deal with the files? Atm we're using the first file in the directory
+        File data = new File(folder + "/scrabble_games.csv");
 
-        File folder_file = new File(folder);
-        File[] listOfFiles = folder_file.listFiles();
-
-        if (listOfFiles != null) {
-            if (DEBUG) System.out.println("[INFO] Reading " + listOfFiles[0].getName());
-            BufferedReader csvReader = new BufferedReader(new FileReader(listOfFiles[0]));
+        if (data.canRead()) {
+            if (DEBUG) System.out.println("[INFO] Reading " + data.getName());
+            BufferedReader csvReader = new BufferedReader(new FileReader(data));
             String[] header = csvReader.readLine().split(","); // skip first line
             String line;
             String[] nextRecord;
@@ -142,13 +138,13 @@ public class HBaseScrabble {
             ArrayList<Put> putList = new ArrayList<>();
             while ((line = csvReader.readLine()) != null) {
                 nextRecord = line.split(",");
-                putList.add(putAll(hTable, nextRecord[1], nextRecord[4], nextRecord[9], nextRecord[3], nextRecord[0], nextRecord[2],
+                putList.add(putAll(nextRecord[1], nextRecord[4], nextRecord[9], nextRecord[3], nextRecord[0], nextRecord[2],
                         nextRecord[5], nextRecord[6], nextRecord[7], nextRecord[8],
                         nextRecord[10], nextRecord[11], nextRecord[12], nextRecord[13], nextRecord[14],
                         nextRecord[15], nextRecord[16], nextRecord[17], nextRecord[18]));
 
                 if (DEBUG && c % 10000 == 0) {
-                    System.out.println("##### Inserted line " + c + ", " + (c * 100 / 1542642) + "% done.");
+                    System.out.println("[INFO] Inserted line n: " + c + ", " + (int) (c * 100.0 / 1542642) + "% done.");
                     /*
                     for (int i = 0; i < nextRecord.length; i++) {
                         System.out.println(header[i] + " : " + nextRecord[i]);
@@ -172,7 +168,6 @@ public class HBaseScrabble {
     /**
      * Creates the put object and inserts the single row into the hBase table
      *
-     * @param hTable          Reference table
      * @param tourneyid
      * @param winnername
      * @param loserid
@@ -195,13 +190,12 @@ public class HBaseScrabble {
      * @throws InterruptedIOException
      * @throws RetriesExhaustedWithDetailsException
      */
-    private Put putAll(HTable hTable, String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
+    private Put putAll(String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
                        String winnerscore, String winneroldrating, String winnernewrating, String winnerpos,
                        String losername, String loserscore, String loseroldrating, String losernewrating, String loserpos,
                        String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
 
         // primary column family
-        byte[] key = createKey(tourneyid, winnername, gameid);
         byte[] byte_tourneyid = tourneyid.getBytes();
         byte[] byte_winnername = winnername.getBytes();
         byte[] byte_loserid = loserid.getBytes();
@@ -225,7 +219,7 @@ public class HBaseScrabble {
         byte[] byte_lexicon = lexicon.getBytes();
 
         // Put command
-        Put put = new Put(createKey(tourneyid, winnername, gameid));
+        Put put = new Put(createKey(tourneyid, gameid));
         long ts = System.currentTimeMillis();
 
         put.add(primaryCf.getBytes(), "tourneyid".getBytes(), ts, byte_tourneyid);
@@ -260,17 +254,15 @@ public class HBaseScrabble {
      * 4 byte per il gameid (max in the dataset: 1823783) = 32 bit (in Two's Complement)
      *
      * @param tourneyid  Tourney ID
-     * @param winnername Winner name
      * @param gameid     Game ID
      * @return Array of bytes containing the generated key
      */
-    private byte[] createKey(String tourneyid, String winnername, String gameid) {
+    private byte[] createKey(String tourneyid, String gameid) {
         byte[] key = new byte[keyTotalSize];
         byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
         byte[] gameid_bin = ByteBuffer.allocate(key3Size).putInt(Integer.valueOf(gameid)).array();
         System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
-        System.arraycopy(winnername.getBytes(), 0, key, key1Size, winnername.length());
-        System.arraycopy(gameid_bin, 0, key, key1Size + key2Size, gameid_bin.length);
+        System.arraycopy(gameid_bin, 0, key, key1Size, gameid_bin.length);
         return key;
     }
 
@@ -301,43 +293,6 @@ public class HBaseScrabble {
     }
 
     /**
-     * Creates the lowermost key of the specific tourney ID and winner name
-     *
-     * @param tourneyid
-     * @param winnername
-     * @return An array of bytes containing the first key for the tourney ID and winner name
-     */
-    private byte[] generateStartKey(String tourneyid, String winnername) {
-        byte[] key = new byte[keyTotalSize];
-        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
-        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
-        System.arraycopy(winnername.getBytes(), 0, key, key1Size, winnername.length());
-        for (int i = key2Size; i < keyTotalSize; i++) {
-            key[i] = (byte) 0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
-        }
-        System.out.println();
-        return key;
-    }
-
-    /**
-     * Creates the uppermost key of the specific tourney ID and winner name
-     *
-     * @param tourneyid
-     * @param winnername
-     * @return An array of bytes containing the last key for the tourney ID and winner name
-     */
-    private byte[] generateEndKey(String tourneyid, String winnername) {
-        byte[] key = new byte[keyTotalSize];
-        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
-        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
-        System.arraycopy(winnername.getBytes(), 0, key, key1Size, winnername.length());
-        for (int i = key2Size; i < keyTotalSize; i++) {
-            key[i] = (byte) 127;
-        }
-        return key;
-    }
-
-    /**
      * Returns all the opponents (Loserid) of a given Winnername in a tournament (Tourneyid).
      *
      * @param tourneyid
@@ -348,13 +303,22 @@ public class HBaseScrabble {
     public List<String> query1(String tourneyid, String winnername) throws IOException {
         HTable hTable = new HTable(config, table);
 
-        byte[] startKey = generateStartKey(tourneyid, winnername);
-        byte[] endKey = generateEndKey(tourneyid, winnername);
+        byte[] startKey = generateStartKey(tourneyid);
+        byte[] endKey = generateEndKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
+        ;
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
-        ResultScanner rs = hTable.getScanner(scan);
 
+        SingleColumnValueFilter winnerFilter = new SingleColumnValueFilter(
+                primaryCf.getBytes(),
+                "winnername".getBytes(),
+                CompareFilter.CompareOp.EQUAL,
+                winnername.getBytes()
+        );
+        scan.setFilter(winnerFilter);
+
+        ResultScanner rs = hTable.getScanner(scan);
         Result result = rs.next();
         while (result != null && !result.isEmpty()) {
             res.add(Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes())));
