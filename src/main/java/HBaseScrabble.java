@@ -22,7 +22,8 @@ public class HBaseScrabble {
     private final short key3Size = 4;
     private final short keyTotalSize = key1Size + key3Size;
 
-    //DEBUG
+    //EXTRA
+    private final int totalRows = 1542642;
     private final boolean DEBUG = true;
 
     /**
@@ -65,7 +66,7 @@ public class HBaseScrabble {
      * @throws InterruptedException
      */
     private void tableSplit(int n_regions) throws IOException, InterruptedException {
-        int totalRows = 1542642;
+        int totalRows = this.totalRows;
         byte[] splitPoint;
         for (int i = 1; i < n_regions; i++) {
             splitPoint = generateStartKey(Integer.toString(totalRows / n_regions * i));
@@ -144,7 +145,7 @@ public class HBaseScrabble {
                         nextRecord[15], nextRecord[16], nextRecord[17], nextRecord[18]));
 
                 if (DEBUG && c % 10000 == 0) {
-                    System.out.println("[INFO] Inserted line n: " + c + ", " + (int) (c * 100.0 / 1542642) + "% done.");
+                    System.out.println("[INFO] Inserted line n: " + c + ", " + (int) (c * 100.0 / this.totalRows) + "% done.");
                     /*
                     for (int i = 0; i < nextRecord.length; i++) {
                         System.out.println(header[i] + " : " + nextRecord[i]);
