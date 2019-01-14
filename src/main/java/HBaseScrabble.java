@@ -49,76 +49,25 @@ public class HBaseScrabble {
         HTableDescriptor hTable = new HTableDescriptor(table);
         hTable.addFamily(new HColumnDescriptor(primaryCf).setMaxVersions(10));
         hTable.addFamily(new HColumnDescriptor(sideCf).setMaxVersions(10));
-        hBaseAdmin.createTable(hTable);
-        try {
-            tableSplit();
+        byte[][] regions = createTableRegions();
+        hBaseAdmin.createTable(hTable, regions);
+        if (DEBUG) System.out.println("[INFO] Table " + hTable.toString() + " created");
+    }
 
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+    private byte[][] createTableRegions() throws IOException {
+        int n_regions = getServers().length;
+        byte[][] regions = new byte[n_regions - 1][keyTotalSize];
+        int maxTourneyId = 9784; // maximum tourneyId
+        for (int i = 1; i < n_regions; i++) {
+            regions[i - 1] = generateStartKey(Integer.toString(maxTourneyId / n_regions * i));
         }
+        if (DEBUG) System.out.println("[INFO] " + n_regions + " regions are created");
+        return regions;
     }
 
     private ServerName[] getServers() throws IOException {
         Collection<ServerName> serverNames = hBaseAdmin.getClusterStatus().getServers();
         return serverNames.toArray(new ServerName[serverNames.size()]);
-    }
-    /**
-     * Split table into region servers
-     *
-     * @throws IOException
-     * @throws InterruptedException
-     */
-    private void tableSplit() throws IOException, InterruptedException {
-        int n_regions = getServers().length;
-        int totalRows = 9784;
-        byte[] splitPoint;
-        for (int i = 1; i < n_regions; i++) {
-            splitPoint = generateStartKey(Integer.toString(totalRows / n_regions * i));
-            hBaseAdmin.split(table.toBytes(), splitPoint);
-            waitOnlineNewRegionsAfterSplit(splitPoint);
-        }
-        if (DEBUG)
-            System.out.println("[INFO] " + table.toString() + " has been split into " + n_regions + " regions successfully");
-    }
-
-    /**
-     * Checks the existence of the two regions divided by the startKey
-     *
-     * @param startKey Limit key between the regions to check
-     * @throws IOException
-     * @throws InterruptedException
-     */
-    private void waitOnlineNewRegionsAfterSplit(byte[] startKey) throws IOException, InterruptedException {
-        short sleepTime = 1000;
-        short maxRetries = 5;
-        HRegionInfo newLeftSideRegion = null;
-        HRegionInfo newRightSideRegion = null;
-
-        int retry = 1;
-        do {
-            Thread.sleep(sleepTime);
-
-            List<HRegionInfo> regions = hBaseAdmin.getTableRegions(table);
-            Iterator<HRegionInfo> iter = regions.iterator();
-
-            while (iter.hasNext() && (newLeftSideRegion == null || newRightSideRegion == null)) {
-                HRegionInfo regInfo = iter.next();
-                if (Arrays.equals(regInfo.getEndKey(), startKey)) {
-                    newLeftSideRegion = regInfo;
-                }
-                if (Arrays.equals(regInfo.getStartKey(), startKey)) {
-                    newRightSideRegion = regInfo;
-                }
-            }
-            if (newLeftSideRegion == null || newRightSideRegion == null) {
-                if (DEBUG) System.out.print("Waiting " + sleepTime + " ms...");
-                retry++;
-            }
-        } while ((newLeftSideRegion == null || newRightSideRegion == null) && retry <= maxRetries);
-
-        if (retry > maxRetries) {
-            throw new IOException("Split failed, can't find regions with startKey and endKey = " + Bytes.toStringBinary(startKey));
-        }
     }
 
     /**
@@ -150,11 +99,6 @@ public class HBaseScrabble {
 
                 if (DEBUG && c % 10000 == 0) {
                     System.out.println("[INFO] Inserted line n: " + c + ", " + (int) (c * 100.0 / this.totalRows) + "% done.");
-                    /*
-                    for (int i = 0; i < nextRecord.length; i++) {
-                        System.out.println(header[i] + " : " + nextRecord[i]);
-                    }
-                    */
                 }
                 c++;
                 if (putList.size() == 10000) {
