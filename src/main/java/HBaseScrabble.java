@@ -51,22 +51,26 @@ public class HBaseScrabble {
         hTable.addFamily(new HColumnDescriptor(sideCf).setMaxVersions(10));
         hBaseAdmin.createTable(hTable);
         try {
-            tableSplit(3);
+            tableSplit();
 
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
     }
 
+    private ServerName[] getServers() throws IOException {
+        Collection<ServerName> serverNames = hBaseAdmin.getClusterStatus().getServers();
+        return serverNames.toArray(new ServerName[serverNames.size()]);
+    }
     /**
      * Split table into region servers
      *
-     * @param n_regions Number of region servers
      * @throws IOException
      * @throws InterruptedException
      */
-    private void tableSplit(int n_regions) throws IOException, InterruptedException {
-        int totalRows = this.totalRows;
+    private void tableSplit() throws IOException, InterruptedException {
+        int n_regions = getServers().length;
+        int totalRows = 9784;
         byte[] splitPoint;
         for (int i = 1; i < n_regions; i++) {
             splitPoint = generateStartKey(Integer.toString(totalRows / n_regions * i));
@@ -85,13 +89,14 @@ public class HBaseScrabble {
      * @throws InterruptedException
      */
     private void waitOnlineNewRegionsAfterSplit(byte[] startKey) throws IOException, InterruptedException {
-        short sleepTime = 500;
+        short sleepTime = 1000;
         short maxRetries = 5;
         HRegionInfo newLeftSideRegion = null;
         HRegionInfo newRightSideRegion = null;
 
         int retry = 1;
         do {
+            Thread.sleep(sleepTime);
 
             List<HRegionInfo> regions = hBaseAdmin.getTableRegions(table);
             Iterator<HRegionInfo> iter = regions.iterator();
@@ -107,7 +112,6 @@ public class HBaseScrabble {
             }
             if (newLeftSideRegion == null || newRightSideRegion == null) {
                 if (DEBUG) System.out.print("Waiting " + sleepTime + " ms...");
-                Thread.sleep(sleepTime);
                 retry++;
             }
         } while ((newLeftSideRegion == null || newRightSideRegion == null) && retry <= maxRetries);
