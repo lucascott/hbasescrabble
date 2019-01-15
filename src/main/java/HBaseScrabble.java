@@ -5,7 +5,10 @@ import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.hadoop.hbase.filter.SingleColumnValueFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
@@ -52,19 +55,31 @@ public class HBaseScrabble {
         byte[][] regions = createTableRegions();
         hBaseAdmin.createTable(hTable, regions);
         if (DEBUG) System.out.println("[INFO] Table " + hTable.toString() + " created");
+        if (DEBUG) System.out.println("[INFO] " + (regions.length + 1) + " table regions are created");
     }
 
+    /**
+     * Creates the splitting keys depending on the number of online region server
+     *
+     * @return Array of limit keys for splitting table into regions
+     * @throws IOException
+     */
     private byte[][] createTableRegions() throws IOException {
         int n_regions = getServers().length;
         byte[][] regions = new byte[n_regions - 1][keyTotalSize];
         int maxTourneyId = 9784; // maximum tourneyId
         for (int i = 1; i < n_regions; i++) {
-            regions[i - 1] = generateStartKey(Integer.toString(maxTourneyId / n_regions * i));
+            regions[i - 1] = generateKey(Integer.toString(maxTourneyId / n_regions * i));
         }
-        if (DEBUG) System.out.println("[INFO] " + n_regions + " regions are created");
         return regions;
     }
 
+    /**
+     * Retrieve the list of online region servers
+     *
+     * @return List of online region servers
+     * @throws IOException
+     */
     private ServerName[] getServers() throws IOException {
         Collection<ServerName> serverNames = hBaseAdmin.getClusterStatus().getServers();
         return serverNames.toArray(new ServerName[serverNames.size()]);
@@ -117,32 +132,12 @@ public class HBaseScrabble {
     /**
      * Creates the put object and inserts the single row into the hBase table
      *
-     * @param tourneyid
-     * @param winnername
-     * @param loserid
-     * @param winnerid
-     * @param gameid
-     * @param tie
-     * @param winnerscore
-     * @param winneroldrating
-     * @param winnernewrating
-     * @param winnerpos
-     * @param losername
-     * @param loserscore
-     * @param loseroldrating
-     * @param losernewrating
-     * @param loserpos
-     * @param round
-     * @param division
-     * @param date
-     * @param lexicon
-     * @throws InterruptedIOException
-     * @throws RetriesExhaustedWithDetailsException
+     * @return hBase Put object containing information of the row to insert
      */
     private Put putAll(String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
                        String winnerscore, String winneroldrating, String winnernewrating, String winnerpos,
                        String losername, String loserscore, String loseroldrating, String losernewrating, String loserpos,
-                       String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
+                       String round, String division, String date, String lexicon) {
 
         // primary column family
         byte[] byte_tourneyid = tourneyid.getBytes();
@@ -197,9 +192,9 @@ public class HBaseScrabble {
 
     /**
      * Creates the key for a specific entry
-     * <p>
-     * 4 byte for the tourneyid (max in the dataset: 3021) = 32 bit (in Two's Complement)
-     * 50 byte for the winnername
+     *
+     * The key is made of 2 parts (in order):
+     * 4 byte for the tourneyid (max in the dataset: 9784) = 32 bit (in Two's Complement)
      * 4 byte per il gameid (max in the dataset: 1823783) = 32 bit (in Two's Complement)
      *
      * @param tourneyid  Tourney ID
@@ -221,7 +216,7 @@ public class HBaseScrabble {
      * @param tourneyid
      * @return An array of bytes containing the first key for the tourney ID
      */
-    private byte[] generateStartKey(String tourneyid) {
+    private byte[] generateKey(String tourneyid) {
         byte[] key = new byte[keyTotalSize];
         byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
         System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
@@ -229,16 +224,6 @@ public class HBaseScrabble {
             key[i] = (byte) 0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
         }
         return key;
-    }
-
-    /**
-     * Creates the uppermost key of the specific tourney ID
-     *
-     * @param tourneyid
-     * @return An array of bytes containing the last key for the tourney ID
-     */
-    private byte[] generateEndKey(String tourneyid) {
-        return generateStartKey(tourneyid);
     }
 
     /**
@@ -252,8 +237,8 @@ public class HBaseScrabble {
     public List<String> query1(String tourneyid, String winnername) throws IOException {
         HTable hTable = new HTable(config, table);
 
-        byte[] startKey = generateStartKey(tourneyid);
-        byte[] endKey = generateEndKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
+        byte[] startKey = generateKey(tourneyid);
+        byte[] endKey = generateKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
         ;
         List<String> res = new ArrayList<>();
 
@@ -289,6 +274,12 @@ public class HBaseScrabble {
      * @throws IOException
      */
     public List<String> query2(String firsttourneyid, String lasttourneyid) throws IOException {
+
+        if (Integer.parseInt(firsttourneyid) >= Integer.parseInt(lasttourneyid)) {
+            System.out.println("[ERROR] Last tourney ID has to be greater than first tourney ID");
+            return new ArrayList<>();
+        }
+
         HTable hTable = new HTable(config, table);
 
         HashSet<String> freq = new HashSet<>();
@@ -298,8 +289,8 @@ public class HBaseScrabble {
             freq = new HashSet<>();
             prevRes = res;
             res = new HashSet<>();
-            byte[] startKey = generateStartKey(Integer.toString(i));
-            byte[] endKey = generateEndKey(Integer.toString(i + 1));
+            byte[] startKey = generateKey(Integer.toString(i));
+            byte[] endKey = generateKey(Integer.toString(i + 1));
 
             Scan scan = new Scan(startKey, endKey);
             ResultScanner rs = hTable.getScanner(scan);
@@ -342,8 +333,8 @@ public class HBaseScrabble {
     public List<String> query3(String tourneyid) throws IOException {
         HTable hTable = new HTable(config, table);
 
-        byte[] startKey = generateStartKey(tourneyid);
-        byte[] endKey = generateEndKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
+        byte[] startKey = generateKey(tourneyid);
+        byte[] endKey = generateKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
@@ -360,10 +351,9 @@ public class HBaseScrabble {
             String gId = Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes()));
             String wId = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
             String lId = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
-            res.add(gId + "-" + wId + "-" + lId);
+            res.add(gId + ": " + wId + "-" + lId);
             result = rs.next();
         }
-
         return res;
     }
 
