@@ -229,7 +229,14 @@ public class HBaseScrabble {
         return key;
     }
 
-    private byte[] generateStartKey(String tourneyid, String tie) {
+    /**
+     * Creates the lowermost key of the specific tourney ID with tie
+     *
+     * @param tourneyid
+     * @param tie
+     * @return An array of bytes containing the first key for the tourney ID with tie
+     */
+    private byte[] generateStartKeyTie(String tourneyid, String tie) {
         byte[] key = new byte[keyTotalSize];
         byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
         System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
@@ -240,7 +247,14 @@ public class HBaseScrabble {
         return key;
     }
 
-    private byte[] generateEndKey(String tourneyid, String tie) {
+    /**
+     * Creates the uppermost key of the specific tourney ID with tie
+     *
+     * @param tourneyid
+     * @param tie
+     * @return An array of bytes containing the last key for the tourney ID with tie
+     */
+    private byte[] generateEndKeyTie(String tourneyid, String tie) {
         byte[] key = new byte[keyTotalSize];
         byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
         System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
@@ -358,8 +372,8 @@ public class HBaseScrabble {
     public List<String> query3(String tourneyid) throws IOException {
         HTable hTable = new HTable(config, table);
         String tie = "True";
-        byte[] startKey = generateStartKey(tourneyid, tie);
-        byte[] endKey = generateEndKey(tourneyid, tie);
+        byte[] startKey = generateStartKeyTie(tourneyid, tie);
+        byte[] endKey = generateEndKeyTie(tourneyid, tie);
         List<String> res = new ArrayList<>();
 
         Scan scan = new Scan(startKey, endKey);
