@@ -1,25 +1,39 @@
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.filter.CompareFilter;
+import org.apache.hadoop.hbase.filter.SingleColumnValueFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.*;
 
 
 public class HBaseScrabble {
     private Configuration config;
     private HBaseAdmin hBaseAdmin;
-    TableName table = TableName.valueOf("ScrabbleGames");
-    String primaryCf = "primaryCf";
-    String sideCf = "sideCf";
+    private TableName table = TableName.valueOf("ScrabbleGames");
+    private String primaryCf = "primaryCf";
+    private String sideCf = "sideCf";
+
+    // key sizing
+    private final short key1Size = 4;
+    private final short key2Size = 1;
+    private final short key3Size = 4;
+    private final short keyTotalSize = key1Size + key2Size + key3Size;
+
+    //EXTRA
+    private final int totalRows = 1542642;
+    private final boolean DEBUG = true;
 
     /**
      * The Constructor. Establishes the connection with HBase.
-     * @param zkHost
+     *
+     * @param zkHost Host address to connect to
      * @throws IOException
      */
     public HBaseScrabble(String zkHost) throws IOException {
@@ -30,67 +44,109 @@ public class HBaseScrabble {
         this.hBaseAdmin = new HBaseAdmin(config);
     }
 
+    /**
+     * Creates the table and splits it into region servers.
+     *
+     * @throws IOException
+     */
     public void createTable() throws IOException {
-
         HTableDescriptor hTable = new HTableDescriptor(table);
         hTable.addFamily(new HColumnDescriptor(primaryCf).setMaxVersions(10));
         hTable.addFamily(new HColumnDescriptor(sideCf).setMaxVersions(10));
-        this.hBaseAdmin.createTable(hTable);
+        byte[][] regions = createTableRegions();
+        hBaseAdmin.createTable(hTable, regions);
+        if (DEBUG) System.out.println("[INFO] Table " + hTable.toString() + " created");
+        if (DEBUG) System.out.println("[INFO] " + (regions.length + 1) + " table regions are created");
     }
 
-    public void loadTable(String folder)throws IOException{
+    /**
+     * Creates the splitting keys depending on the number of online region server
+     *
+     * @return Array of limit keys for splitting table into regions
+     * @throws IOException
+     */
+    private byte[][] createTableRegions() throws IOException {
+        int n_regions = getServers().length;
+        byte[][] regions = new byte[n_regions - 1][keyTotalSize];
+        int maxTourneyId = 9784; // maximum tourneyId
+        for (int i = 1; i < n_regions; i++) {
+            regions[i - 1] = generateKey(Integer.toString(maxTourneyId / n_regions * i));
+        }
+        return regions;
+    }
 
-        HTable hTable = new HTable(config,table);
+    /**
+     * Retrieve the list of online region servers
+     *
+     * @return List of online region servers
+     * @throws IOException
+     */
+    private ServerName[] getServers() throws IOException {
+        Collection<ServerName> serverNames = hBaseAdmin.getClusterStatus().getServers();
+        return serverNames.toArray(new ServerName[serverNames.size()]);
+    }
 
-        // TODO: input as a file or a folder? ATM is a file.
+    /**
+     * Loads the data from a directory into the hBase table
+     *
+     * @param folder Path of the directory from which the source data is fetched
+     * @throws IOException
+     */
+    public void loadTable(String folder) throws IOException {
 
-        // Alternative (folder case):
+        HTable hTable = new HTable(config, table);
 
-        File folder_file = new File(folder);
-        File[] listOfFiles = folder_file.listFiles();
+        File data = new File(folder + "/scrabble_games.csv");
 
-        if (listOfFiles != null) {
-            System.out.println("[INFO] Reading " + listOfFiles[0].getName());
-            BufferedReader csvReader = new BufferedReader(new FileReader(listOfFiles[0]));
+        if (data.canRead()) {
+            if (DEBUG) System.out.println("[INFO] Reading " + data.getName());
+            BufferedReader csvReader = new BufferedReader(new FileReader(data));
             String[] header = csvReader.readLine().split(","); // skip first line
             String line;
             String[] nextRecord;
             int c = 0;
+            ArrayList<Put> putList = new ArrayList<>();
             while ((line = csvReader.readLine()) != null) {
                 nextRecord = line.split(",");
-                putAll(hTable, nextRecord[1], nextRecord[4], nextRecord[9], nextRecord[3], nextRecord[0], nextRecord[2],
-                        nextRecord[5],nextRecord[6],nextRecord[7],nextRecord[8],
-                        nextRecord[10],nextRecord[11],nextRecord[12],nextRecord[13], nextRecord[14],
-                        nextRecord[15],nextRecord[16],nextRecord[17],nextRecord[18]);
+                putList.add(putAll(nextRecord[1], nextRecord[4], nextRecord[9], nextRecord[3], nextRecord[0], nextRecord[2],
+                        nextRecord[5], nextRecord[6], nextRecord[7], nextRecord[8],
+                        nextRecord[10], nextRecord[11], nextRecord[12], nextRecord[13], nextRecord[14],
+                        nextRecord[15], nextRecord[16], nextRecord[17], nextRecord[18]));
 
-                if (c%100 == 0) {
-                    System.out.println("##### Inserted line " + c);
-                    for (int i = 0; i < nextRecord.length; i++) {
-                        System.out.println(header[i] + " : " + nextRecord[i]);
-                    }
+                if (DEBUG && c % 10000 == 0) {
+                    System.out.println("[INFO] Inserted line n: " + c + ", " + (int) (c * 100.0 / this.totalRows) + "% done.");
                 }
                 c++;
+                if (putList.size() == 10000) {
+                    hTable.put(putList);
+                    putList = new ArrayList<>();
+                }
             }
-            System.out.println("[INFO] Inserted " + c + " lines.");
-        }
-        else {
-            System.out.println("[INFO] There are no files in the directory.");
+            hTable.put(putList);
+
+            if (DEBUG) System.out.println("[INFO] Inserted " + c + " lines.");
+        } else {
+            System.err.println("[ERROR] There are no files in the directory.");
         }
     }
 
-    private void putAll(HTable hTable, String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
-                        String winnerscore, String winneroldrating, String winnernewrating, String winnerpos,
-                        String losername, String loserscore, String loseroldrating, String losernewrating, String loserpos,
-                        String round, String division, String date, String lexicon) throws InterruptedIOException, RetriesExhaustedWithDetailsException {
+    /**
+     * Creates the put object and inserts the single row into the hBase table
+     *
+     * @return hBase Put object containing information of the row to insert
+     */
+    private Put putAll(String tourneyid, String winnername, String loserid, String winnerid, String gameid, String tie,
+                       String winnerscore, String winneroldrating, String winnernewrating, String winnerpos,
+                       String losername, String loserscore, String loseroldrating, String losernewrating, String loserpos,
+                       String round, String division, String date, String lexicon) {
 
         // primary column family
-        byte[] key = Bytes.toBytes(tourneyid + winnername + gameid);
         byte[] byte_tourneyid = tourneyid.getBytes();
         byte[] byte_winnername = winnername.getBytes();
         byte[] byte_loserid = loserid.getBytes();
         byte[] byte_winnerid = winnerid.getBytes();
         byte[] byte_gameid = gameid.getBytes();
-        byte[] byte_tie = tie.getBytes(); //Bytes.toBytes(tie.equals("True")? 1:0);
+        byte[] byte_tie = tie.getBytes();
 
         // side column family
         byte[] byte_winnerscore = winnerscore.getBytes();
@@ -105,10 +161,10 @@ public class HBaseScrabble {
         byte[] byte_round = round.getBytes();
         byte[] byte_division = division.getBytes();
         byte[] byte_date = date.getBytes();
-        byte[] byte_lexicon = lexicon.getBytes(); //Bytes.toBytes(lexicon.equals("True")? 1:0);
+        byte[] byte_lexicon = lexicon.getBytes();
 
         // Put command
-        Put put = new Put(key);
+        Put put = new Put(createKey(tourneyid, tie, gameid));
         long ts = System.currentTimeMillis();
 
         put.add(primaryCf.getBytes(), "tourneyid".getBytes(), ts, byte_tourneyid);
@@ -132,122 +188,210 @@ public class HBaseScrabble {
         put.add(sideCf.getBytes(), "date".getBytes(), ts, byte_date);
         put.add(sideCf.getBytes(), "lexicon".getBytes(), ts, byte_lexicon);
 
-        hTable.put(put);
+        return put;
     }
 
     /**
-     * This method generates the key
-     * @param values The value of each column
-     * @param keyTable The position of each value that is required to create the key in the array of values.
-     * @return The encoded key to be inserted in HBase
+     * Creates the key for a specific entry
+     *
+     * The key is made of 3 parts (in order):
+     * 4 byte for the tourneyid (max in the dataset: 9784) = 32 bit (in Two's Complement)
+     * 1 byte for the tie
+     * 4 byte per il gameid (max in the dataset: 1823783) = 32 bit (in Two's Complement)
+     *
+     * @param tourneyid  Tourney ID
+     * @param gameid     Game ID
+     * @return Array of bytes containing the generated key
      */
-    private byte[] getKey(String[] values, int[] keyTable) {
-        String keyString = "";
-        for (int keyId : keyTable){
-            keyString += values[keyId];
-        }
-        byte[] key = Bytes.toBytes(keyString);
-
+    private byte[] createKey(String tourneyid, String tie, String gameid) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        byte[] gameid_bin = ByteBuffer.allocate(key3Size).putInt(Integer.valueOf(gameid)).array();
+        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
+        System.arraycopy(tie.substring(0, key2Size).getBytes(), 0, key, key1Size, key2Size);
+        System.arraycopy(gameid_bin, 0, key, key1Size + key2Size, gameid_bin.length);
         return key;
     }
 
+    /**
+     * Creates the lowermost key of the specific tourney ID
+     *
+     * @param tourneyid
+     * @return An array of bytes containing the first key for the tourney ID
+     */
+    private byte[] generateKey(String tourneyid) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
+        for (int i = key1Size; i < keyTotalSize; i++) {
+            key[i] = (byte) 0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
+        }
+        return key;
+    }
 
+    /**
+     * Creates the lowermost key of the specific tourney ID with tie
+     *
+     * @param tourneyid
+     * @param tie
+     * @return An array of bytes containing the first key for the tourney ID with tie
+     */
+    private byte[] generateStartKeyTie(String tourneyid, String tie) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
+        System.arraycopy(tie.substring(0, key2Size).getBytes(), 0, key, key1Size, key2Size);
+        for (int i = key1Size + key2Size; i < keyTotalSize; i++) {
+            key[i] = (byte) 0; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
+        }
+        return key;
+    }
 
+    /**
+     * Creates the uppermost key of the specific tourney ID with tie
+     *
+     * @param tourneyid
+     * @param tie
+     * @return An array of bytes containing the last key for the tourney ID with tie
+     */
+    private byte[] generateEndKeyTie(String tourneyid, String tie) {
+        byte[] key = new byte[keyTotalSize];
+        byte[] tourneyid_bin = ByteBuffer.allocate(key1Size).putInt(Integer.valueOf(tourneyid)).array();
+        System.arraycopy(tourneyid_bin, 0, key, 0, tourneyid_bin.length);
+        System.arraycopy(tie.substring(0, key2Size).getBytes(), 0, key, key1Size, key2Size);
+        for (int i = key1Size + key2Size; i < keyTotalSize; i++) {
+            key[i] = (byte) 127; // not -128 because otherwise the key starts with 1s (because of the Two's Complement)
+        }
+        return key;
+    }
+
+    /**
+     * Returns all the opponents (Loserid) of a given Winnername in a tournament (Tourneyid).
+     *
+     * @param tourneyid
+     * @param winnername
+     * @return Array of results of the query
+     * @throws IOException
+     */
     public List<String> query1(String tourneyid, String winnername) throws IOException {
-        HTable hTable = new HTable(config,table);
+        HTable hTable = new HTable(config, table);
 
-        byte[] startKey = (tourneyid + winnername).getBytes();
-        byte[] endKey = (tourneyid + winnername + "z").getBytes();
+        byte[] startKey = generateKey(tourneyid);
+        byte[] endKey = generateKey(Integer.toString(Integer.parseInt(tourneyid) + 1));
+        ;
         List<String> res = new ArrayList<>();
 
-        Scan scan = new Scan(startKey,endKey);
+        Scan scan = new Scan(startKey, endKey);
+
+        SingleColumnValueFilter winnerFilter = new SingleColumnValueFilter(
+                primaryCf.getBytes(),
+                "winnername".getBytes(),
+                CompareFilter.CompareOp.EQUAL,
+                winnername.getBytes()
+        );
+        scan.setFilter(winnerFilter);
+
         ResultScanner rs = hTable.getScanner(scan);
-
         Result result = rs.next();
-        while (result!=null && !result.isEmpty()){
-            //String key = Bytes.toString(result.getRow());
-            res.add(Bytes.toString(result.getValue(primaryCf.getBytes(),"loserid".getBytes())));
-            //System.out.println("Key : "+ key + " Loserid : " + loserid);
-
+        while (result != null && !result.isEmpty()) {
+            res.add(Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes())));
+            if (DEBUG)
+                System.out.println("Loserid : " + Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes())));
             result = rs.next();
         }
 
         return res;
     }
 
-    // Returns the ids of the players (winner and loser) that have participated more than once
-    // in all tournaments between two given Tourneyids.
+    /**
+     * Returns the ids of the players (winner and loser) that have participated more than once
+     * in all tournaments between two given Tourneyids.
+     *
+     * @param firsttourneyid
+     * @param lasttourneyid
+     * @return Array of results of the query
+     * @throws IOException
+     */
     public List<String> query2(String firsttourneyid, String lasttourneyid) throws IOException {
-        HTable hTable = new HTable(config,table);
 
-        byte[] startKey = (firsttourneyid).getBytes();
-        byte[] endKey = (lasttourneyid + "z").getBytes();
-        List<String> res = new ArrayList<>();
-
-        Scan scan = new Scan(startKey,endKey);
-        ResultScanner rs = hTable.getScanner(scan);
-        Map<String, MutableInt> freq = new HashMap<>();
-        MutableInt count;
-
-        Result result = rs.next();
-        while (result!=null && !result.isEmpty()){
-            //String key = Bytes.toString(result.getRow());
-            String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(),"loserid".getBytes()));
-            String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(),"winnerid".getBytes()));
-            count = freq.get(winnerid);
-            if (count == null) {
-                freq.put(winnerid, new MutableInt());
-            }
-            else {
-                count.increment();
-            }
-            count = freq.get(loserid);
-            if (count == null) {
-                freq.put(loserid, new MutableInt());
-            }
-            else {
-                count.increment();
-            }
-            //System.out.println("Key : "+ key + " Win : " + winnerid + " Lose : " + loserid);
-
-            result = rs.next();
+        if (Integer.parseInt(firsttourneyid) >= Integer.parseInt(lasttourneyid)) {
+            System.out.println("[ERROR] Last tourney ID has to be greater than first tourney ID");
+            return new ArrayList<>();
         }
-        for (Map.Entry<String, MutableInt> entry : freq.entrySet())
-        {
-            if (entry.getValue().get() > 1){
-                res.add(entry.getKey());
+
+        HTable hTable = new HTable(config, table);
+
+        HashSet<String> freq = new HashSet<>();
+        HashSet<String> res = new HashSet<>();
+        HashSet<String> prevRes = new HashSet<>();
+        for (int i = Integer.parseInt(firsttourneyid); i < Integer.parseInt(lasttourneyid); i++) {
+            freq = new HashSet<>();
+            prevRes = res;
+            res = new HashSet<>();
+            byte[] startKey = generateKey(Integer.toString(i));
+            byte[] endKey = generateKey(Integer.toString(i + 1));
+
+            Scan scan = new Scan(startKey, endKey);
+            ResultScanner rs = hTable.getScanner(scan);
+
+            Result result = rs.next();
+            while (result != null && !result.isEmpty()) {
+                String winnerid = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
+                String loserid = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
+
+                if (i == Integer.parseInt(firsttourneyid)) { // first tourney
+                    if (!freq.add(winnerid))
+                        res.add(winnerid);
+                    if (!freq.add(loserid))
+                        res.add(loserid);
+                } else { // the others
+                    if (!freq.add(winnerid) && prevRes.contains(winnerid))
+                        res.add(winnerid);
+                    if (!freq.add(loserid) && prevRes.contains(loserid))
+                        res.add(loserid);
+                }
+
+                result = rs.next();
+            }
+            if (res.size() == 0) { // if there are no element makes no sense to check further
+                break;
             }
         }
-        return res;
+
+        return new ArrayList<>(res);
     }
-    // Given a Tourneyid, the query returns the Gameid, the ids of the two participants that
-    // have finished in tie.
-    public List<String> query3(String tourneyid) throws IOException {
-        HTable hTable = new HTable(config,table);
 
-        byte[] startKey = (tourneyid).getBytes();
-        byte[] endKey = (tourneyid + "z").getBytes();
+    /**
+     * Given a Tourneyid, the query returns the Gameid, the ids of the two participants that
+     * have finished in tie.
+     *
+     * @param tourneyid
+     * @return Array of results of the query
+     * @throws IOException
+     */
+    public List<String> query3(String tourneyid) throws IOException {
+        HTable hTable = new HTable(config, table);
+        String tie = "True";
+        byte[] startKey = generateStartKeyTie(tourneyid, tie);
+        byte[] endKey = generateEndKeyTie(tourneyid, tie);
         List<String> res = new ArrayList<>();
 
-        Scan scan = new Scan(startKey,endKey);
+        Scan scan = new Scan(startKey, endKey);
         ResultScanner rs = hTable.getScanner(scan);
-
         Result result = rs.next();
-        while (result!=null && !result.isEmpty()){
-            //String key = Bytes.toString(result.getRow());
-            String tie = Bytes.toString(result.getValue(primaryCf.getBytes(),"tie".getBytes()));
-            if (tie.equals("True")) {
-                res.add(Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes())));
-            }
+        while (result != null && !result.isEmpty()) {
+            String gId = Bytes.toString(result.getValue(primaryCf.getBytes(), "gameid".getBytes()));
+            String wId = Bytes.toString(result.getValue(primaryCf.getBytes(), "winnerid".getBytes()));
+            String lId = Bytes.toString(result.getValue(primaryCf.getBytes(), "loserid".getBytes()));
+            res.add(gId + ": " + wId + "-" + lId);
             result = rs.next();
         }
-
         return res;
     }
 
 
     public static void main(String[] args) throws IOException {
-        if(args.length<2){
+        if (args.length < 2) {
             System.out.println("Error: \n1)ZK_HOST:ZK_PORT, \n2)action [createTable, loadTable, query1, query2, query3], \n3)Extra parameters for loadTables and queries:\n" +
                     "\ta) If loadTable: csvsFolder.\n " +
                     "\tb) If query1: tourneyid winnername.\n  " +
@@ -256,52 +400,46 @@ public class HBaseScrabble {
             System.exit(-1);
         }
         HBaseScrabble hBaseScrabble = new HBaseScrabble(args[0]);
-        if(args[1].toUpperCase().equals("CREATETABLE")){
+        if (args[1].toUpperCase().equals("CREATETABLE")) {
             hBaseScrabble.createTable();
-        }
-        else if(args[1].toUpperCase().equals("LOADTABLE")){
-            if(args.length!=3){
+        } else if (args[1].toUpperCase().equals("LOADTABLE")) {
+            if (args.length != 3) {
                 System.out.println("Error: 1) ZK_HOST:ZK_PORT, 2)action [createTables, loadTables], 3)csvsFolder");
                 System.exit(-1);
-            }
-            else if(!(new File(args[2])).isDirectory()){
-                System.out.println("Error: Folder "+args[2]+" does not exist.");
+            } else if (!(new File(args[2])).isDirectory()) {
+                System.out.println("Error: Folder " + args[2] + " does not exist.");
                 System.exit(-2);
             }
             hBaseScrabble.loadTable(args[2]);
-        }
-        else if(args[1].toUpperCase().equals("QUERY1")){
-            if(args.length!=4){
+        } else if (args[1].toUpperCase().equals("QUERY1")) {
+            if (args.length != 4) {
                 System.out.println("Error: 1) ZK_HOST:ZK_PORT, 2)query1, " +
                         "3) tourneyid 4) winnername");
                 System.exit(-1);
             }
 
             List<String> opponentsName = hBaseScrabble.query1(args[2], args[3]);
-            System.out.println("There are "+opponentsName.size()+" opponents of winner "+args[3]+" that play in tourney "+args[2]+".");
-            System.out.println("The list of opponents is: "+Arrays.toString(opponentsName.toArray(new String[opponentsName.size()])));
-        }
-        else if(args[1].toUpperCase().equals("QUERY2")){
-            if(args.length!=4){
+            System.out.println("There are " + opponentsName.size() + " opponents of winner " + args[3] + " that play in tourney " + args[2] + ".");
+            System.out.println("The list of opponents is: " + Arrays.toString(opponentsName.toArray(new String[opponentsName.size()])));
+        } else if (args[1].toUpperCase().equals("QUERY2")) {
+            if (args.length != 4) {
                 System.out.println("Error: 1) ZK_HOST:ZK_PORT, 2)query2, " +
                         "3) firsttourneyid 4) lasttourneyid");
                 System.exit(-1);
             }
-            List<String> playerNames =hBaseScrabble.query2(args[2], args[3]);
-            System.out.println("There are "+playerNames.size()+" players that participates in more than one tourney between tourneyid "+args[2]+" and tourneyid "+args[3]+" .");
-            System.out.println("The list of players is: "+Arrays.toString(playerNames.toArray(new String[playerNames.size()])));
-        }
-        else if(args[1].toUpperCase().equals("QUERY3")){
-            if(args.length!=3){
+            List<String> playerNames = hBaseScrabble.query2(args[2], args[3]);
+            System.out.println("There are " + playerNames.size() + " players that participates in more than one tourney between tourneyid " + args[2] + " and tourneyid " + args[3] + " .");
+            System.out.println("The list of players is: " + Arrays.toString(playerNames.toArray(new String[playerNames.size()])));
+        } else if (args[1].toUpperCase().equals("QUERY3")) {
+            if (args.length != 3) {
                 System.out.println("Error: 1) ZK_HOST:ZK_PORT, 2) query3, " +
                         "3) tourneyid");
                 System.exit(-1);
             }
             List<String> games = hBaseScrabble.query3(args[2]);
-            System.out.println("There are "+games.size()+" that ends in tie in tourneyid "+args[2]+" .");
-            System.out.println("The list of games is: "+Arrays.toString(games.toArray(new String[games.size()])));
-        }
-        else{
+            System.out.println("There are " + games.size() + " that ends in tie in tourneyid " + args[2] + " .");
+            System.out.println("The list of games is: " + Arrays.toString(games.toArray(new String[games.size()])));
+        } else {
             System.out.println("Error: \n1)ZK_HOST:ZK_PORT, \n2)action [createTable, loadTable, query1, query2, query3], \n3)Extra parameters for loadTables and queries:\n" +
                     "\ta) If loadTable: csvsFolder.\n " +
                     "\tb) If query1: tourneyid winnername.\n  " +
@@ -311,10 +449,4 @@ public class HBaseScrabble {
         }
 
     }
-}
-
-class MutableInt {
-    private int value = 1; // note that we start at 1 since we're counting
-    public void increment() { ++value;      }
-    public int get()       { return value; }
 }
